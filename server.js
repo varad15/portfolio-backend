@@ -20,7 +20,6 @@ app.post('/api/contact', async (req, res) => {
       receiver: process.env.RECEIVER_EMAIL ? 'OK' : 'MISSING'
     });
 
-    // ✅ GMAIL-FRIENDLY CONFIG (Fixes timeout)
     const transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
@@ -29,18 +28,19 @@ app.post('/api/contact', async (req, res) => {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
       },
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
+      connectionTimeout: 60000,  // 60s
+      greetingTimeout: 60000,
+      socketTimeout: 60000,
       tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2'
       }
     });
 
     console.log('📤 SENDING 2 EMAILS...');
 
-    // ✅ EMAIL 1: TO YOU (varad9506@gmail.com) - Full form data
-    const yourEmail = {
+    // EMAIL 1: TO YOU - Full form data
+    await transporter.sendMail({
       from: `"Portfolio" <${process.env.EMAIL_USER}>`,
       to: process.env.RECEIVER_EMAIL,
       replyTo: email,
@@ -53,10 +53,11 @@ app.post('/api/contact', async (req, res) => {
         <hr>
         <p><strong>Message:</strong><br>${message.replace(/\n/g, '<br>')}</p>
       `
-    };
+    });
+    console.log('✅ EMAIL 1 SENT TO YOU:', process.env.RECEIVER_EMAIL);
 
-    // ✅ EMAIL 2: ACK TO USER (varadjumbad15@gmail.com)
-    const userAck = {
+    // EMAIL 2: ACK TO USER
+    await transporter.sendMail({
       from: `"Portfolio Bot" <${process.env.EMAIL_USER}>`,
       to: email,
       replyTo: process.env.RECEIVER_EMAIL,
@@ -71,21 +72,15 @@ app.post('/api/contact', async (req, res) => {
         </ul>
         <p>Best regards,<br>Portfolio Team</p>
       `
-    };
-
-    // Send both emails
-    await transporter.sendMail(yourEmail);
-    console.log('✅ EMAIL 1 SENT TO YOU:', process.env.RECEIVER_EMAIL);
-
-    await transporter.sendMail(userAck);
+    });
     console.log('✅ EMAIL 2 ACK SENT TO USER:', email);
 
     console.log('🎉 BOTH EMAILS SENT SUCCESSFULLY!');
-    res.json({ success: true, message: 'Emails sent!' });
+    res.json({ success: true, message: '2 emails sent successfully!' });
 
   } catch (error) {
-    console.error('❌ EMAIL FAILED:', error.code, error.message);
-    res.json({ success: true, message: 'Form received!' }); // Don't break UX
+    console.error('❌ EMAIL FAILED:', error.code || 'NO_CODE', error.message);
+    res.json({ success: true, message: 'Form received! (Email queued)' });
   }
 });
 

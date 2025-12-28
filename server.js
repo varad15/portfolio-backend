@@ -4,29 +4,26 @@ require('dotenv').config();
 
 const app = express();
 
-// ✅ BULLETPROOF CORS - ALL YOUR DOMAINS
+// ✅ FIXED CORS - Allow ALL origins + Vercel domain
 app.use(cors({
   origin: [
     'https://website-cv-jme2-img5seauw-varad15s-projects.vercel.app',
     'https://website-cv.vercel.app',
-    'https://website-cv-jme2-img5seauw-varad15s-projects.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5174'
+    '*',  // ✅ TEMPORARY: Allow ALL for testing
   ],
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 
-// Handle preflight requests
+// Handle preflight requests FIRST
 app.options('*', cors());
 
 app.use(express.json({ limit: '10mb' }));
 
 // Request logging
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} ${req.method} ${req.path} - Origin: ${req.get('Origin') || 'none'}`);
   next();
 });
 
@@ -35,26 +32,30 @@ setInterval(() => {
   console.log('🤖 KEEP ALIVE PING:', new Date().toISOString());
 }, 4 * 60 * 1000); // Every 4 minutes
 
-// ✅ HEALTH CHECK - Wake up Render + Env status
+// ✅ ENHANCED HEALTH CHECK - Show EXACT env values
 app.get('/api/health', (req, res) => {
   res.json({
-    status: 'OK',
+    status: 'OK ✅',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     env_check: {
-      has_emailjs_service: !!process.env.EMAILJS_SERVICE_ID,
-      has_emailjs_template: !!process.env.EMAILJS_TEMPLATE_ID,
-      has_emailjs_key: !!process.env.EMAILJS_PUBLIC_KEY,
-      has_receiver_email: !!process.env.RECEIVER_EMAIL,
-      receiver_email: process.env.RECEIVER_EMAIL ? 'SET' : 'MISSING'
+      EMAILJS_SERVICE_ID: process.env.EMAILJS_SERVICE_ID || '❌ MISSING',
+      EMAILJS_TEMPLATE_ID: process.env.EMAILJS_TEMPLATE_ID || '❌ MISSING',
+      EMAILJS_PUBLIC_KEY: process.env.EMAILJS_PUBLIC_KEY ? '✅ SET' : '❌ MISSING',
+      RECEIVER_EMAIL: process.env.RECEIVER_EMAIL || '❌ MISSING'
     }
   });
 });
 
-// ✅ BULLETPROOF CONTACT FORM - SINGLE EMAIL FIRST
+// ✅ BULLETPROOF CONTACT FORM - FIXED EmailJS + DETAILED LOGS
 app.post('/api/contact', async (req, res) => {
   try {
-    console.log('📥 FORM RECEIVED:', req.body);
+    console.log('📥 FORM RECEIVED:', {
+      name: req.body.name,
+      email: req.body.email,
+      subject: req.body.subject,
+      message: req.body.message?.substring(0, 50)
+    });
 
     // 1. VALIDATE FORM DATA
     const { name, email, subject, message } = req.body;
@@ -66,34 +67,33 @@ app.post('/api/contact', async (req, res) => {
       });
     }
 
-    if (name.length < 2 || email.length < 5 || subject.length < 3 || message.length < 5) {
-      return res.status(400).json({
-        success: false,
-        error: 'Fields too short. Please provide valid data.'
-      });
-    }
+    // 2. SHOW EXACT ENV VALUES BEFORE SENDING
+    console.log('🔑 ENV VALUES:', {
+      service_id: process.env.EMAILJS_SERVICE_ID,
+      template_id: process.env.EMAILJS_TEMPLATE_ID,
+      public_key: process.env.EMAILJS_PUBLIC_KEY ? `${process.env.EMAILJS_PUBLIC_KEY.substring(0, 10)}...` : 'MISSING',
+      receiver_email: process.env.RECEIVER_EMAIL
+    });
 
-    // 2. VALIDATE ENV VARS
+    // 3. VALIDATE ENV VARS WITH EXACT ERROR
     if (!process.env.EMAILJS_SERVICE_ID) {
-      return res.status(500).json({ success: false, error: 'EMAILJS_SERVICE_ID missing' });
+      return res.status(500).json({ success: false, error: 'EMAILJS_SERVICE_ID missing in Render Environment Variables' });
     }
     if (!process.env.EMAILJS_TEMPLATE_ID) {
-      return res.status(500).json({ success: false, error: 'EMAILJS_TEMPLATE_ID missing' });
+      return res.status(500).json({ success: false, error: 'EMAILJS_TEMPLATE_ID missing in Render Environment Variables' });
     }
     if (!process.env.EMAILJS_PUBLIC_KEY) {
-      return res.status(500).json({ success: false, error: 'EMAILJS_PUBLIC_KEY missing' });
+      return res.status(500).json({ success: false, error: 'EMAILJS_PUBLIC_KEY missing! Get from: https://dashboard.emailjs.com/admin/account' });
     }
     if (!process.env.RECEIVER_EMAIL) {
-      return res.status(500).json({ success: false, error: 'RECEIVER_EMAIL missing' });
+      return res.status(500).json({ success: false, error: 'RECEIVER_EMAIL missing in Render Environment Variables' });
     }
 
-    console.log('✅ FORM VALIDATED:', { name, email: email.substring(0, 20) + '...', subject });
-
-    // 3. EMAIL 1: TO YOU (Varad) - FULL MESSAGE
+    // 4. PREPARE EmailJS DATA
     const emailData = {
       service_id: process.env.EMAILJS_SERVICE_ID,
       template_id: process.env.EMAILJS_TEMPLATE_ID,
-      public_key: process.env.EMAILJS_PUBLIC_KEY,
+      public_key: process.env.EMAILJS_PUBLIC_KEY,  // ✅ CRITICAL: public_key NOT user_id
       template_params: {
         to_email: process.env.RECEIVER_EMAIL,
         from_name: name,
@@ -103,47 +103,69 @@ app.post('/api/contact', async (req, res) => {
       }
     };
 
-    console.log('🚀 SENDING EMAIL TO VARAD...');
+    console.log('🚀 SENDING TO EmailJS:', {
+      service_id: emailData.service_id,
+      template_id: emailData.template_id,
+      public_key: emailData.public_key.substring(0, 10) + '...',
+      to_email: emailData.template_params.to_email
+    });
+
+    // 5. SEND EMAIL WITH TIMEOUT
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     const emailResponse = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Origin': '*'
       },
-      body: JSON.stringify(emailData)
+      body: JSON.stringify(emailData),
+      signal: controller.signal
     });
 
-    const emailResponseText = await emailResponse.text();
-    console.log('📤 EMAILJS RESPONSE:', emailResponse.status, emailResponseText.substring(0, 300));
+    clearTimeout(timeoutId);
 
-    if (!emailResponse.ok) {
-      let errorMsg = `EmailJS failed: ${emailResponse.status}`;
+    const emailResponseText = await emailResponse.text();
+    console.log('📤 EMAILJS FULL RESPONSE:', {
+      status: emailResponse.status,
+      statusText: emailResponse.statusText,
+      response: emailResponseText.substring(0, 500)
+    });
+
+    // 6. CHECK RESPONSE
+    if (emailResponse.ok) {
+      console.log('🎉 EMAIL SENT SUCCESSFULLY!');
+      res.json({
+        success: true,
+        message: 'Email sent successfully! Check your inbox ✨',
+        emails_sent: 1,
+        emailjs_status: emailResponse.status
+      });
+    } else {
+      let errorMsg = `EmailJS Error ${emailResponse.status}`;
+
       try {
         const errorJson = JSON.parse(emailResponseText);
-        errorMsg += ` - ${errorJson.message || 'Unknown error'}`;
-      } catch {
-        errorMsg += ` - ${emailResponseText.substring(0, 100)}`;
+        console.error('📤 EMAILJS ERROR JSON:', errorJson);
+        errorMsg += ` - ${errorJson.message || errorJson.error || 'Unknown EmailJS error'}`;
+      } catch (parseError) {
+        console.error('📤 EMAILJS RAW ERROR:', emailResponseText);
+        errorMsg += ` - Raw response: ${emailResponseText.substring(0, 200)}`;
       }
 
-      console.error('💥 EMAILJS ERROR:', errorMsg);
+      console.error('💥 EMAILJS FAILED:', errorMsg);
       return res.status(500).json({
         success: false,
         error: errorMsg
       });
     }
 
-    console.log('🎉 EMAIL SENT SUCCESSFULLY TO:', process.env.RECEIVER_EMAIL);
-
-    // SUCCESS RESPONSE
-    res.json({
-      success: true,
-      message: 'Email sent successfully! Check your inbox ✨',
-      emails_sent: 1
-    });
-
   } catch (error) {
     console.error('💥 CRITICAL ERROR:', {
       message: error.message,
+      name: error.name,
+      code: error.code,
       stack: error.stack
     });
 
@@ -157,6 +179,7 @@ app.post('/api/contact', async (req, res) => {
 
 // 404 Handler
 app.use((req, res) => {
+  console.log('❌ 404:', req.method, req.path);
   res.status(404).json({
     success: false,
     error: 'Endpoint not found. Use /api/health or /api/contact'
@@ -165,7 +188,11 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
-  console.error('🚨 UNHANDLED ERROR:', err);
+  console.error('🚨 UNHANDLED ERROR:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.url
+  });
   res.status(500).json({
     success: false,
     error: 'Server error occurred'
@@ -175,14 +202,13 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 BACKEND LIVE: https://portfolio-backend-1-hvs1.onrender.com`);
+  console.log(`\n🚀 BACKEND LIVE ON PORT ${PORT}`);
   console.log(`✅ HEALTH: https://portfolio-backend-1-hvs1.onrender.com/api/health`);
   console.log(`✅ CONTACT: POST https://portfolio-backend-1-hvs1.onrender.com/api/contact`);
-  console.log(`✅ PORT: ${PORT}`);
-  console.log(`✅ ENV CHECK:`, {
-    emailjs_service: !!process.env.EMAILJS_SERVICE_ID,
-    emailjs_template: !!process.env.EMAILJS_TEMPLATE_ID,
-    emailjs_key: !!process.env.EMAILJS_PUBLIC_KEY,
-    receiver_email: !!process.env.RECEIVER_EMAIL
+  console.log('✅ ENV STATUS:', {
+    EMAILJS_SERVICE_ID: process.env.EMAILJS_SERVICE_ID || 'MISSING',
+    EMAILJS_TEMPLATE_ID: process.env.EMAILJS_TEMPLATE_ID || 'MISSING',
+    EMAILJS_PUBLIC_KEY: process.env.EMAILJS_PUBLIC_KEY ? '✅ OK' : '❌ MISSING',
+    RECEIVER_EMAIL: process.env.RECEIVER_EMAIL || 'MISSING'
   });
 });

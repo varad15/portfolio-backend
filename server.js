@@ -18,16 +18,13 @@ app.post('/api/contact', async (req, res) => {
 
     console.log('📧 FORM DATA:', { name, email, subject, message: message.substring(0, 100) });
 
-    // ✅ EMAILJS ONLY - FIXED 403
-    if (!process.env.EMAILJS_SERVICE_ID || !process.env.EMAILJS_PUBLIC_KEY) {
-      throw new Error('EmailJS env vars missing');
-    }
+    // ✅ SINGLE TEMPLATE: template_zlzf0n4 (works for BOTH emails)
 
-    // EMAIL 1: TO YOU (Main Template)
-    const emailjsData = {
+    // EMAIL 1: TO YOU (Varad receives full message)
+    const toYouData = {
       service_id: process.env.EMAILJS_SERVICE_ID,
       template_id: process.env.EMAILJS_TEMPLATE_ID,
-      public_key: process.env.EMAILJS_PUBLIC_KEY,  // ✅ FIXED: public_key not user_id
+      public_key: process.env.EMAILJS_PUBLIC_KEY,
       template_params: {
         to_email: process.env.RECEIVER_EMAIL,
         from_name: name,
@@ -37,72 +34,53 @@ app.post('/api/contact', async (req, res) => {
       }
     };
 
-    console.log('🔄 SENDING EMAIL 1 via EmailJS...');
+    console.log('🔄 EMAIL 1 → Varad...');
     const response1 = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': '*'  // ✅ CORS fix
-      },
-      body: JSON.stringify(emailjsData)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(toYouData)
     });
 
-    const response1Data = await response1.json();
-    console.log('EMAILJS Response 1:', response1.status, response1Data);
-
     if (!response1.ok) {
-      throw new Error(`EmailJS failed: ${response1.status} - ${response1Data.message || 'Unknown'}`);
+      const errData = await response1.json();
+      throw new Error(`Email 1 failed: ${response1.status} - ${errData.message || 'Unknown'}`);
     }
-
     console.log('✅ EMAIL 1 SENT TO:', process.env.RECEIVER_EMAIL);
 
-    // EMAIL 2: ACK TO USER
+    // EMAIL 2: ACK TO USER (Same template, different params)
     const ackData = {
       service_id: process.env.EMAILJS_SERVICE_ID,
-      template_id: process.env.EMAILJS_ACK_TEMPLATE_ID || process.env.EMAILJS_TEMPLATE_ID,
-      public_key: process.env.EMAILJS_PUBLIC_KEY,  // ✅ FIXED
+      template_id: process.env.EMAILJS_TEMPLATE_ID,  // SAME TEMPLATE!
+      public_key: process.env.EMAILJS_PUBLIC_KEY,
       template_params: {
-        to_name: name,
-        to_email: email,
+        to_email: email,           // User receives ACK
+        from_name: 'Portfolio Team',
         from_email: process.env.RECEIVER_EMAIL,
-        message: 'Thank you for your message! We will reply soon.'
+        subject: `Thanks ${name}! Message received ✨`,
+        message: `Hi ${name},\n\nYour message "${subject}" has been received!\n\nI'll reply within 24 hours.\n\nBest,\nPortfolio Team`
       }
     };
 
-    console.log('🔄 SENDING EMAIL 2 (ACK) via EmailJS...');
+    console.log('🔄 EMAIL 2 → User ACK...');
     const response2 = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': '*'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(ackData)
     });
 
-    const response2Data = await response2.json();
-    console.log('EMAILJS Response 2:', response2.status, response2Data);
-
     if (!response2.ok) {
-      throw new Error(`Ack email failed: ${response2.status} - ${response2Data.message || 'Unknown'}`);
+      const errData = await response2.json();
+      throw new Error(`Email 2 failed: ${response2.status} - ${errData.message || 'Unknown'}`);
     }
 
-    console.log('✅ BOTH EMAILS SENT via EmailJS!');
-    res.json({
-      success: true,
-      message: '2 emails sent successfully via EmailJS!'
-    });
+    console.log('✅ BOTH EMAILS SENT via single template!');
+    res.json({ success: true, message: '2 emails sent successfully!' });
 
   } catch (error) {
-    console.error('❌ EMAILJS ERROR:', {
-      message: error.message,
-      stack: error.stack
-    });
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Email service failed'
-    });
+    console.error('❌ EMAILJS ERROR:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ EmailJS Backend on port ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Single Template Backend on port ${PORT}`));

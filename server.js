@@ -13,7 +13,7 @@ app.post('/api/contact', async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
 
-    // VALIDATE REQUIRED FIELDS
+    // VALIDATE INPUT
     if (!name || !email || !subject || !message) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
@@ -28,31 +28,26 @@ app.post('/api/contact', async (req, res) => {
 
     if (missingEnv.length > 0) {
       console.error('❌ MISSING ENV:', missingEnv);
-      return res.status(500).json({ success: false, error: `Missing env vars: ${missingEnv.join(', ')}` });
+      return res.status(500).json({ success: false, error: `Missing env: ${missingEnv.join(', ')}` });
     }
 
-    // FIXED TRANSPORTER - Render.com compatible
-    const transporter = nodemailer.createTransporter({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // true for 465, false for other ports
+    // ✅ FIXED: createTransport (NOT createTransporter)
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',  // ✅ Render.com compatible
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
       },
       pool: true,
       maxConnections: 1,
-      maxMessages: 5,
       connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 5000,
-      logger: true, // Enable for Render logs
+      logger: true,
       debug: true
     });
 
-    // VERIFY TRANSPORTER FIRST
+    // TEST CONNECTION
     await transporter.verify();
-    console.log('✅ SMTP Connection verified');
+    console.log('✅ Gmail SMTP verified');
 
     // EMAIL 1: TO YOU
     await transporter.sendMail({
@@ -69,6 +64,7 @@ app.post('/api/contact', async (req, res) => {
         <p><strong>Message:</strong><br>${message.replace(/\n/g, '<br>')}</p>
       `
     });
+    console.log('✅ EMAIL 1 SENT TO:', process.env.RECEIVER_EMAIL);
 
     // EMAIL 2: ACK TO USER
     await transporter.sendMail({
@@ -81,19 +77,17 @@ app.post('/api/contact', async (req, res) => {
         <p>Your message has been received and will be replied to soon.</p>
       `
     });
+    console.log('✅ EMAIL 2 ACK SENT TO:', email);
 
-    console.log('🎉 BOTH EMAILS SENT!');
-    res.json({ success: true, message: 'Emails sent successfully!' });
+    res.json({ success: true, message: '2 emails sent successfully!' });
 
   } catch (error) {
     console.error('❌ EMAIL ERROR:', {
       code: error.code,
       message: error.message,
-      response: error.response?.message,
       stack: error.stack
     });
 
-    // RETURN REAL ERROR TO FRONTEND
     res.status(500).json({
       success: false,
       error: error.message || 'Email service failed',
